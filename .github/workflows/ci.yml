@@ -1,0 +1,304 @@
+name: NICo Core CI
+
+on:
+  push:
+    branches:
+      - main
+      - "pull-request/[0-9]+"
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+      - "v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*"
+      - "v[0-9].[0-9].[0-9]-rc[0-9]*"
+
+env:
+  # Build configuration
+  CARGO_INCREMENTAL: 0
+  CARGO_HOME: ${{ github.workspace }}/cargo
+  FF_USE_FASTZIP: "true"
+  GIT_SUBMODULE_STRATEGY: recursive
+
+jobs:
+  changes:
+    name: Detect Core CI Gate
+    runs-on: ubuntu-latest
+    outputs:
+      run_core_ci: ${{ steps.gate.outputs.run_core_ci }}
+      non_rest_changed: ${{ steps.non-rest-changes.outputs.non_rest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect non-rest changes
+        id: non-rest-changes
+        if: startsWith(github.ref, 'refs/heads/pull-request/')
+        uses: dorny/paths-filter@v3
+        with:
+          base: main
+          predicate-quantifier: every
+          filters: |
+            non_rest:
+              - '**'
+              - '!rest-api/**'
+              - '!.github/workflows/rest-*.yml'
+              - '!helm/rest/**'
+              - '!docs/**'
+              - '!fern/**'
+
+      - name: Decide whether Core CI should run
+        id: gate
+        env:
+          REF: ${{ github.ref }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+          NON_REST_CHANGED: ${{ steps.non-rest-changes.outputs.non_rest }}
+        run: |
+          run_core_ci=true
+
+          if [[ "${REF}" =~ ^refs/heads/pull-request/[0-9]+$ ]]; then
+            run_core_ci="${NON_REST_CHANGED}"
+          fi
+
+          if [[ "${COMMIT_MESSAGE}" =~ ci-run-complete-pipeline ]]; then
+            run_core_ci=true
+          fi
+
+          echo "run_core_ci=${run_core_ci}" >> "$GITHUB_OUTPUT"
+          echo "Core CI gate: ${run_core_ci}"
+
+  # ============================================================================
+  # PREPARE STAGE
+  # ============================================================================
+
+  prepare:
+    needs:
+      - changes
+    if: ${{ needs.changes.outputs.run_core_ci == 'true' }}
+    runs-on: linux-amd64-cpu4
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      helm_version: ${{ steps.version.outputs.helm_version }}
+      short_sha: ${{ steps.version.outputs.short_sha }}
+      extras_container_ref: ${{ steps.resolve-extras.outputs.extras_container_ref }}
+      build_container_x86_64_run: ${{ steps.base-container-gate.outputs.build_container_x86_64_run }}
+      build_container_x86_64_version: ${{ steps.base-container-gate.outputs.build_container_x86_64_version }}
+      runtime_container_x86_64_run: ${{ steps.base-container-gate.outputs.runtime_container_x86_64_run }}
+      runtime_container_x86_64_version: ${{ steps.base-container-gate.outputs.runtime_container_x86_64_version }}
+      build_container_aarch64_run: ${{ steps.base-container-gate.outputs.build_container_aarch64_run }}
+      build_container_aarch64_version: ${{ steps.base-container-gate.outputs.build_container_aarch64_version }}
+      build_artifacts_container_x86_64_run: ${{ steps.base-container-gate.outputs.build_artifacts_container_x86_64_run }}
+      build_artifacts_container_x86_64_version: ${{ steps.base-container-gate.outputs.build_artifacts_container_x86_64_version }}
+      build_artifacts_container_aarch64_run: ${{ steps.base-container-gate.outputs.build_artifacts_container_aarch64_run }}
+      build_artifacts_container_aarch64_version: ${{ steps.base-container-gate.outputs.build_artifacts_container_aarch64_version }}
+      runtime_container_aarch64_run: ${{ steps.base-container-gate.outputs.runtime_container_aarch64_run }}
+      runtime_container_aarch64_version: ${{ steps.base-container-gate.outputs.runtime_container_aarch64_version }}
+      proto_files_changed: ${{ steps.base-container-gate.outputs.proto_files_changed }}
+      source_files_changed: ${{ steps.base-container-gate.outputs.source_files_changed }}
+      release_build_args: ${{ steps.release-metadata.outputs.build_args }}
+      release_build_args_aarch64: ${{ steps.release-metadata.outputs.build_args_aarch64 }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect build-container-x86_64 changes
+        id: build-container-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            build_container:
+              - 'dev/docker/Dockerfile.build-container-x86_64'
+            runtime_container:
+              - 'dev/docker/Dockerfile.runtime-container-x86_64'
+            runtime_container_aarch64:
+              - 'dev/docker/Dockerfile.runtime-container-aarch64'
+            build_container_aarch64:
+              - 'dev/docker/Dockerfile.build-container-aarch64'
+            build_artifacts_x86_64:
+              - 'dev/docker/Dockerfile.build-artifacts-container-x86_64'
+            build_artifacts_aarch64:
+              - 'dev/docker/Dockerfile.build-artifacts-container-aarch64'
+            proto_files:
+              - '**/*.proto'
+            source_files:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Makefile.toml'
+              - 'rust-toolchain.toml'
+
+      - name: Calculate version
+        id: version
+        run: |
+
+          set -euo pipefail
+
+          # Fetch tags for accurate git describe
+          git fetch --tags --force
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "Using Git describe to extract version as VERSION and HELM_VERSION"
+          VERSION=$(git describe --tags --first-parent --always --long)
+          # HELM_VERSION strips leading 'v' for strict SemVer and replaces the last '-' with '.'
+          HELM_VERSION_BASE="${VERSION#v}"
+          HELM_VERSION=$(echo "$HELM_VERSION_BASE" | sed 's/\(.*\)-/\1./')
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "helm_version=${HELM_VERSION}" >> $GITHUB_OUTPUT
+          echo "Calculated VERSION: ${VERSION}"
+          echo "Calculated HELM_VERSION: ${HELM_VERSION}"
+
+          # Output to GitHub Summary
+          echo "## 📦 Build Version" >> $GITHUB_STEP_SUMMARY
+          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| VERSION | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| HELM_VERSION | \`${HELM_VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Decide if build-container-x86_64 must run
+        id: base-container-gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_CONTAINER_X86_64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.build_container }}
+          RUNTIME_CONTAINER_X86_64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.runtime_container }}
+          RUNTIME_CONTAINER_AARCH64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.runtime_container_aarch64 }}
+          BUILD_CONTAINER_AARCH64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.build_container_aarch64 }}
+          BUILD_ARTIFACTS_X86_64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.build_artifacts_x86_64 }}
+          BUILD_ARTIFACTS_AARCH64_DOCKERFILE_CHANGED: ${{ steps.build-container-changes.outputs.build_artifacts_aarch64 }}
+          PROTO_FILES_CHANGED: ${{ steps.build-container-changes.outputs.proto_files }}
+          SOURCE_FILES_CHANGED: ${{ steps.build-container-changes.outputs.source_files }}
+        run: |
+          build_container_x86_64_run=false
+          runtime_container_x86_64_run=false
+          build_container_aarch64_run=false
+          runtime_container_aarch64_run=false
+          build_artifacts_container_x86_64_run=false
+          build_artifacts_container_aarch64_run=false
+          proto_files_changed=false
+          source_files_changed=false
+
+          if [[ "${COMMIT_MESSAGE}" =~ ci-rebuild-base-containers ]]; then
+            build_container_x86_64_run=true
+            runtime_container_x86_64_run=true
+            build_container_aarch64_run=true
+            runtime_container_aarch64_run=true
+            build_artifacts_container_x86_64_run=true
+            build_artifacts_container_aarch64_run=true
+          elif [[ "${BUILD_CONTAINER_X86_64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            build_container_x86_64_run=true
+          fi
+
+          if [[ "${PROTO_FILES_CHANGED}" == "true" ]]; then
+             proto_files_changed=true
+          fi
+
+          if [[ "${SOURCE_FILES_CHANGED}" == "true" ]]; then
+             source_files_changed=true
+          fi
+
+          if [[ "${RUNTIME_CONTAINER_X86_64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            runtime_container_x86_64_run=true
+          fi
+
+          if [[ "${RUNTIME_CONTAINER_AARCH64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            runtime_container_aarch64_run=true
+          fi
+
+          if [[ "${BUILD_CONTAINER_AARCH64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            build_container_aarch64_run=true
+          fi
+
+          if [[ "${BUILD_ARTIFACTS_X86_64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            build_artifacts_container_x86_64_run=true
+          fi
+
+          if [[ "${BUILD_ARTIFACTS_AARCH64_DOCKERFILE_CHANGED}" == "true" ]]; then
+            build_artifacts_container_aarch64_run=true
+          fi
+
+          echo "build_container_x86_64_run=${build_container_x86_64_run}" >> "$GITHUB_OUTPUT"
+          echo "runtime_container_x86_64_run=${runtime_container_x86_64_run}" >> "$GITHUB_OUTPUT"
+          echo "build_container_aarch64_run=${build_container_aarch64_run}" >> "$GITHUB_OUTPUT"
+          echo "runtime_container_aarch64_run=${runtime_container_aarch64_run}" >> "$GITHUB_OUTPUT"
+          echo "build_artifacts_container_x86_64_run=${build_artifacts_container_x86_64_run}" >> "$GITHUB_OUTPUT"
+          echo "build_artifacts_container_aarch64_run=${build_artifacts_container_aarch64_run}" >> "$GITHUB_OUTPUT"
+          echo "proto_files_changed=${proto_files_changed}" >> "$GITHUB_OUTPUT"
+          echo "source_files_changed=${source_files_changed}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$build_container_x86_64_run" == "true" ]]; then
+            echo "build_container_x86_64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_container_x86_64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$runtime_container_x86_64_run" == "true" ]]; then
+            echo "runtime_container_x86_64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "runtime_container_x86_64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$build_container_aarch64_run" == "true" ]]; then
+            echo "build_container_aarch64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_container_aarch64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$runtime_container_aarch64_run" == "true" ]]; then
+            echo "runtime_container_aarch64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "runtime_container_aarch64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$build_artifacts_container_x86_64_run" == "true" ]]; then
+            echo "build_artifacts_container_x86_64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_artifacts_container_x86_64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$build_artifacts_container_aarch64_run" == "true" ]]; then
+            echo "build_artifacts_container_aarch64_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_artifacts_container_aarch64_version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare release container build args
+        id: release-metadata
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHORT_SHA: ${{ steps.version.outputs.short_sha }}
+          BUILD_VERSION: ${{ steps.base-container-gate.outputs.build_container_x86_64_version }}
+          RUNTIME_VERSION: ${{ steps.base-container-gate.outputs.runtime_container_x86_64_version }}
+          BUILD_VERSION_AARCH64: ${{ steps.base-container-gate.outputs.build_container_aarch64_version }}
+          RUNTIME_VERSION_AARCH64: ${{ steps.base-container-gate.outputs.runtime_container_aarch64_version }}
+        run: |
+          set -euo pipefail
+
+          # x86_64 build args
+          BUILD_REF="nvcr.io/0837451325059433/carbide-dev/build-container-x86_64:${BUILD_VERSION}"
+          RUNTIME_REF="nvcr.io/0837451325059433/carbide-dev/runtime-container-x86_64:${RUNTIME_VERSION}"
+
+          BUILD_ARGS=$(jq -n -c \
+            --arg VERSION "$VERSION" \
+            --arg SHORT_SHA "$SHORT_SHA" \
+            --arg BUILD "$BUILD_REF" \
+            --arg RUNTIME "$RUNTIME_REF" \
+            '{VERSION: $VERSION, CI_COMMIT_SHORT_SHA: $SHORT_SHA, CONTAINER_BUILD_X86_64: $BUILD, CONTAINER_RUNTIME_X86_64: $RUNTIME}')
+
+          echo "build_args=${BUILD_ARGS}" >> "$GITHUB_OUTPUT"
+
+          # aarch64 build args
+          BUILD_REF_AARCH64="nvcr.io/0837451325059433/carbide-dev/build-container-aarch64:${BUILD_VERSION_AARCH64}"
+          RUNTIME_REF_AARCH64="nvcr.io/0837451325059433/carbide-dev/runtime-container-aarch64:${RUNTIME_VERSION_AARCH64}"
+
+          BUILD_ARGS_AARCH64=$(jq -n -c \
+            --arg VERSION "$VERSION" \
+            --arg SHORT_SHA "$SHORT_SHA" \
+            --arg BUILD "$BUILD_REF_AARCH64" \
+            --arg RUNTIME "$RUNTIME_REF_AARCH64" \
+            '{VERSION: $VERSION, CI_COMMIT_SHORT_SHA: $SHORT_SHA, CONTAINER_BUILD_AARCH64: $BUILD, CONTAINER_RUNTIME_AARCH64: $RUNTIME}')
+
+          echo "build_args_aarch64=${BUILD_ARGS_AARCH64}" >> "$GITHUB_OUTPUT"

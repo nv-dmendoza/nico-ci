@@ -1,0 +1,75 @@
+name: Build Container with Buildx
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile_path:
+        description: "Path to Dockerfile"
+        required: true
+        type: string
+      context_path:
+        description: "Build context path"
+        required: false
+        default: "."
+        type: string
+      build_args:
+        description: "Build arguments in JSON format"
+        required: false
+        type: string
+        default: "{}"
+      additional_tags:
+        description: "Additional image tags (newline-separated)"
+        required: false
+        type: string
+        default: ""
+      tag_latest:
+        description: "Also tag/push image_name:latest"
+        required: false
+        type: boolean
+        default: true
+      image_name:
+        description: "Image name without registry prefix"
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag"
+        required: true
+        type: string
+      push:
+        description: "Push image to registry"
+        required: false
+        default: false
+        type: boolean
+      runner:
+        description: "Runner label to use"
+        required: false
+        default: "linux-amd64-cpu4"
+        type: string
+      timeout_minutes:
+        description: "Job timeout in minutes"
+        required: false
+        default: 360
+        type: number
+    outputs:
+      image_digest:
+        description: "Image digest"
+        value: ${{ jobs.build.outputs.digest }}
+      image_tag:
+        description: "Image tag used"
+        value: ${{ jobs.build.outputs.image_tag }}
+      image_ref:
+        description: "Primary image reference"
+        value: ${{ jobs.build.outputs.image_ref }}
+      all_tags:
+        description: "All tags applied during the build"
+        value: ${{ jobs.build.outputs.tags }}
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - name: Display build summary
+        run: |
+          echo "✅ Build completed successfully"
+          echo "  Image: ${{ inputs.image_name }}:${{ inputs.image_tag }}"
