@@ -1,0 +1,55 @@
+name: Create Feature Branch
+
+on:
+  issue_comment:
+    types:
+      - created
+
+jobs:
+  create-feat-branch:
+    if: startsWith(github.event.comment.body, '/feat ')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create feature branch with empty commit
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          REQUESTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BRANCH_NAME=$(echo "${COMMENT_BODY}" | sed 's|^/feat ||' | tr -d '[:space:]')
+
+          if [[ -z "${BRANCH_NAME}" ]]; then
+            echo "No branch name provided"
+            exit 1
+          fi
+
+          FULL_BRANCH="feat/${BRANCH_NAME}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "${FULL_BRANCH}"
+          git commit --allow-empty -m "feat: initialize ${FULL_BRANCH}
+
+Requested by @${REQUESTER} on issue #${ISSUE_NUMBER}
+${ISSUE_URL}"
+
+          git push origin "${FULL_BRANCH}"
+
+          REPO="${{ github.repository }}"
+          BRANCH_URL="https://github.com/${REPO}/tree/${FULL_BRANCH}"
+          gh issue comment "${ISSUE_NUMBER}" --body "Branch created: [${FULL_BRANCH}](${BRANCH_URL})"
