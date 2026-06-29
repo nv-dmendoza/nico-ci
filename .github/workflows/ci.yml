@@ -152,9 +152,8 @@ jobs:
             IS_FEATURE_BRANCH=true
             FIRST_PARENT_TAG=$(git describe --tags --first-parent --abbrev=0 HEAD 2>/dev/null || echo "")
             if [[ "${FIRST_PARENT_TAG}" != *"feat-"* ]]; then
-              echo "## ❌ Feature Branch Validation Failed" >> $GITHUB_STEP_SUMMARY
-              echo "First parent tag does not contain \`feat-\`:" >> $GITHUB_STEP_SUMMARY
-              echo "> ${FIRST_PARENT_TAG:-no tag found}" >> $GITHUB_STEP_SUMMARY
+              echo "## ❌ Feature Branch Tag Generation Failed" >> $GITHUB_STEP_SUMMARY
+              echo "First parent tag does not contain \`feat-\`, tag found: \`${FIRST_PARENT_TAG}\`" >> $GITHUB_STEP_SUMMARY
               exit 1
             fi
           fi
