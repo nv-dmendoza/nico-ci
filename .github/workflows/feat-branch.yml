@@ -43,6 +43,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          TAG_PREFIX=$(git describe --tags --long HEAD | sed 's/-g[0-9a-f]*$//')
+          FEAT_SLUG=$(echo "${FULL_BRANCH}" | tr '/' '-')
+          TAG="${TAG_PREFIX}-${FEAT_SLUG}"
+
           git checkout -b "${FULL_BRANCH}"
           COMMIT_MSG="feat: initialize ${FULL_BRANCH}"
           COMMIT_MSG+=$'\n\n'
@@ -51,7 +55,8 @@ jobs:
           COMMIT_MSG+="${ISSUE_URL}"
           git commit --allow-empty -m "${COMMIT_MSG}"
 
-          git push origin "${FULL_BRANCH}"
+          git tag "${TAG}"
+          git push origin "${FULL_BRANCH}" "${TAG}"
 
           BRANCH_URL="https://github.com/${REPOSITORY}/tree/${FULL_BRANCH}"
           gh issue comment "${ISSUE_NUMBER}" --body "Branch created: [${FULL_BRANCH}](${BRANCH_URL})"
