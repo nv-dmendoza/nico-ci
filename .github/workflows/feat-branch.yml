@@ -59,4 +59,13 @@ jobs:
           git push origin "${FULL_BRANCH}" "${TAG}"
 
           BRANCH_URL="https://github.com/${REPOSITORY}/tree/${FULL_BRANCH}"
-          gh issue comment "${ISSUE_NUMBER}" --body "Branch created: [${FULL_BRANCH}](${BRANCH_URL})"
+          COMMENT_BODY="Branch created: [${FULL_BRANCH}](${BRANCH_URL})"
+          COMMENT_BODY+=$'\n\n'
+          COMMENT_BODY+="To check out locally:"
+          COMMENT_BODY+=$'\n'
+          COMMENT_BODY+='```'
+          COMMENT_BODY+=$'\n'
+          COMMENT_BODY+="git fetch upstream && git checkout -b ${FULL_BRANCH} upstream/${FULL_BRANCH}"
+          COMMENT_BODY+=$'\n'
+          COMMENT_BODY+='```'
+          gh issue comment "${ISSUE_NUMBER}" --body "${COMMENT_BODY}"
