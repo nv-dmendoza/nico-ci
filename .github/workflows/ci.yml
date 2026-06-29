@@ -160,7 +160,7 @@ jobs:
               echo "## ❌ Feature Branch Tag Generation Failed" >> $GITHUB_STEP_SUMMARY
               echo "First parent tag does not contain \`feat-\`, tag found: \`${FIRST_PARENT_TAG}\`" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**To fix:** ask a maintainer to delete this branch, then use \`/feature-branch ${BRANCH_NAME}\` in a GitHub issue to recreate it correctly." >> $GITHUB_STEP_SUMMARY
+              echo "**To fix:** ask a maintainer to delete this branch, then use \`/feature-branch ${FEAT_BRANCH#feat-}\` in a GitHub issue to recreate it correctly." >> $GITHUB_STEP_SUMMARY
               exit 1
             fi
           fi
