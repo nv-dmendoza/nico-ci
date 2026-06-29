@@ -148,8 +148,15 @@ jobs:
           HELM_VERSION=$(echo "$HELM_VERSION_BASE" | sed 's/\(.*\)-/\1./')
 
           IS_FEATURE_BRANCH=false
-          if [[ "${GITHUB_REF}" =~ ^refs/heads/feat/[a-zA-Z0-9-]+$ ]]; then
+          if [[ "${GITHUB_REF}" =~ ^refs/heads/feat/ ]]; then
             IS_FEATURE_BRANCH=true
+            FIRST_PARENT_TAG=$(git describe --tags --first-parent --abbrev=0 HEAD 2>/dev/null || echo "")
+            if [[ "${FIRST_PARENT_TAG}" != *"feat-"* ]]; then
+              echo "## ❌ Feature Branch Validation Failed" >> $GITHUB_STEP_SUMMARY
+              echo "First parent tag does not contain \`feat-\`:" >> $GITHUB_STEP_SUMMARY
+              echo "> ${FIRST_PARENT_TAG:-no tag found}" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
           fi
 
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
