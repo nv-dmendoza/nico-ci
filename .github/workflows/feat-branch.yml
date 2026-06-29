@@ -7,7 +7,7 @@ on:
 
 jobs:
   create-feat-branch:
-    if: startsWith(github.event.comment.body, '/feat ')
+    if: startsWith(github.event.comment.body, '/feature-branch ')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          BRANCH_NAME=$(echo "${COMMENT_BODY}" | sed 's|^/feat ||' | tr -d '[:space:]')
+          BRANCH_NAME=$(echo "${COMMENT_BODY}" | sed 's|^/feature-branch ||' | tr -d '[:space:]')
 
           if [[ -z "${BRANCH_NAME}" ]]; then
             echo "No branch name provided"
