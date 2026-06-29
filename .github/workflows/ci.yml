@@ -74,7 +74,7 @@ jobs:
     needs:
       - changes
     if: ${{ needs.changes.outputs.run_core_ci == 'true' }}
-    runs-on: linux-amd64-cpu4
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       helm_version: ${{ steps.version.outputs.helm_version }}
