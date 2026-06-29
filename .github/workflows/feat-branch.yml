@@ -26,6 +26,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
           REQUESTER: ${{ github.event.comment.user.login }}
+          REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -43,13 +44,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git checkout -b "${FULL_BRANCH}"
-          git commit --allow-empty -m "feat: initialize ${FULL_BRANCH}
-
-Requested by @${REQUESTER} on issue #${ISSUE_NUMBER}
-${ISSUE_URL}"
+          COMMIT_MSG="feat: initialize ${FULL_BRANCH}"
+          COMMIT_MSG+=$'\n\n'
+          COMMIT_MSG+="Requested by @${REQUESTER} on issue #${ISSUE_NUMBER}"
+          COMMIT_MSG+=$'\n'
+          COMMIT_MSG+="${ISSUE_URL}"
+          git commit --allow-empty -m "${COMMIT_MSG}"
 
           git push origin "${FULL_BRANCH}"
 
-          REPO="${{ github.repository }}"
-          BRANCH_URL="https://github.com/${REPO}/tree/${FULL_BRANCH}"
+          BRANCH_URL="https://github.com/${REPOSITORY}/tree/${FULL_BRANCH}"
           gh issue comment "${ISSUE_NUMBER}" --body "Branch created: [${FULL_BRANCH}](${BRANCH_URL})"
