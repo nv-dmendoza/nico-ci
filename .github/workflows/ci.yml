@@ -153,10 +153,6 @@ jobs:
             FIRST_PARENT_TAG=$(git describe --tags --first-parent --abbrev=0 HEAD 2>/dev/null || echo "")
             if [[ "${FIRST_PARENT_TAG}" != *"feat-"* ]]; then
               FEAT_BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | tr '/' '-')
-              FIRST_COMMIT=$(git rev-list --first-parent origin/main..HEAD | tail -1)
-              FIRST_COMMIT_LONG=$(git describe --tags --long "${FIRST_COMMIT}" 2>/dev/null || echo "")
-              PREFIX=$(echo "${FIRST_COMMIT_LONG}" | sed 's/-g[0-9a-f]*$//')
-              EXPECTED_TAG="${PREFIX}-${FEAT_BRANCH}"
               echo "## ❌ Feature Branch Tag Generation Failed" >> $GITHUB_STEP_SUMMARY
               echo "First parent tag does not contain \`feat-\`, tag found: \`${FIRST_PARENT_TAG}\`" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
